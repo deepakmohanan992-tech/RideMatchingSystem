@@ -5,6 +5,9 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 using RideMatchingSystem.Models;
+using Microsoft.AspNetCore.SignalR;
+using RideMatchingSystem.Hubs;
+using RideMatchingSystem.DTOs;
 
 namespace RideMatchingSystem.Services
 {
@@ -13,12 +16,20 @@ namespace RideMatchingSystem.Services
         private readonly DriverService _driverService;
         private readonly RideService _rideService;
         private readonly ILogger<MatchingService> _logger;
+        private readonly IHubContext<RiderHub, IRiderClient> _riderHub;
+        private readonly IHubContext<DriverHub, IDriverClient> _driverHub;
+        private readonly IConnectionRegistry _registry;
+        private readonly IOfferStore _offerStore;
 
-        public MatchingService(DriverService driverService, RideService rideService, ILogger<MatchingService> logger)
+        public MatchingService(DriverService driverService, RideService rideService, ILogger<MatchingService> logger, IHubContext<RiderHub, IRiderClient> riderHub, IHubContext<DriverHub, IDriverClient> driverHub, IConnectionRegistry registry, IOfferStore offerStore)
         {
             _driverService = driverService;
             _rideService = rideService;
             _logger = logger;
+            _riderHub = riderHub;
+            _driverHub = driverHub;
+            _registry = registry;
+            _offerStore = offerStore;
         }
 
         // Haversine distance in meters
@@ -67,15 +78,86 @@ namespace RideMatchingSystem.Services
             var driver = await FindNearestDriverForRideAsync(ride, ct);
             if (driver == null) return false;
 
+            // Create an ephemeral offer and notify the driver(s). Actual assignment happens when driver accepts.
+            var offerId = Guid.NewGuid().ToString();
+            var expiresAt = DateTime.UtcNow.AddSeconds(30);
+
+            var offerRecord = new OfferInfo(offerId, ride.Id, driver.Id, expiresAt);
+            _offerStore.Add(offerRecord);
+
+            // Build offer DTO using existing record shape
+            var offerDto = new RideMatchOfferDto(offerId, ride.Id.ToString(), driver.Id, 0.0, new LocationDto { Latitude = driver.Latitude ?? 0, Longitude = driver.Longitude ?? 0 }, 0m, expiresAt);
+
+            try
+            {
+                // Notify driver via registry if we have connections
+                var conns = _registry.GetConnections(driver.Id).ToList();
+                if (conns.Any())
+                {
+                    foreach (var cid in conns)
+                    {
+                        await _driverHub.Clients.Client(cid).ReceiveRideOffer(offerDto);
+                    }
+                }
+                else
+                {
+                    // Fallback: broadcast to all drivers (demo)
+                    await _driverHub.Clients.All.ReceiveRideOffer(offerDto);
+                }
+
+                // Notify rider that an offer was created (they may be subscribed to ride group)
+                var rideDto = new RideResponseDto(ride.Id.ToString(), ride.RiderId, Models.RideStatus.Requested.ToString(), new LocationDto { Latitude = ride.PickupLatitude, Longitude = ride.PickupLongitude }, null, ride.RequestedAtUtc, 1);
+                await _riderHub.Clients.Group($"ride:{ride.Id}").RideStatusUpdated(rideDto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending offer notifications for ride {RideId}", ride.Id);
+            }
+
+            return true;
+        }
+
+        public async Task<bool> AcceptOfferAsync(string offerId, int driverId, CancellationToken ct = default)
+        {
+            if (!_offerStore.TryGet(offerId, out var offer))
+                return false;
+
+            if (offer.DriverId != driverId)
+                return false;
+
             // Try to assign driver to ride via RideService which handles concurrency/transactions
-            var success = await _rideService.TryAssignDriverAsync(ride.Id, driver.Id, ct);
+            var success = await _rideService.TryAssignDriverAsync(offer.RideId, driverId, ct);
             if (success)
             {
-                _logger.LogInformation("Assigned driver {DriverId} to ride {RideId}", driver.Id, ride.Id);
+                _logger.LogInformation("Driver {DriverId} accepted offer {OfferId} and was assigned to ride {RideId}", driverId, offerId, offer.RideId);
+
+                // Notify rider group
+                var ride = await _rideService.GetRideByIdAsync(offer.RideId, ct);
+                if (ride != null)
+                {
+                    var rideDto = new RideResponseDto(ride.Id.ToString(), ride.RiderId, Models.RideStatus.Assigned.ToString(), new LocationDto { Latitude = ride.PickupLatitude, Longitude = ride.PickupLongitude }, null, ride.RequestedAtUtc, 1);
+                    await _riderHub.Clients.Group($"ride:{ride.Id}").RideStatusUpdated(rideDto);
+
+                    // Notify driver connections that assignment succeeded
+                    var conns = _registry.GetConnections(driverId).ToList();
+                    foreach (var cid in conns)
+                    {
+                        await _driverHub.Clients.Client(cid).RideAssigned(rideDto);
+                    }
+                }
+
+                _offerStore.Remove(offerId);
             }
             else
             {
-                _logger.LogWarning("Failed to assign driver {DriverId} to ride {RideId} (concurrency or unavailable)", driver.Id, ride.Id);
+                _logger.LogWarning("Failed to assign driver {DriverId} for offer {OfferId} (concurrency or unavailable)", driverId, offerId);
+                // inform driver that offer is no longer valid
+                var conns = _registry.GetConnections(driverId).ToList();
+                foreach (var cid in conns)
+                {
+                    await _driverHub.Clients.Client(cid).OfferCancelled(offerId);
+                }
+                _offerStore.Remove(offerId);
             }
 
             return success;

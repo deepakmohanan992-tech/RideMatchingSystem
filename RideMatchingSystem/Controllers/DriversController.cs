@@ -22,21 +22,6 @@ namespace RideMatchingSystem.Controllers
             _logger = logger;
         }
 
-        [HttpDelete("{id}")]
-        /// <summary>
-        /// Delete a driver if they have no associated rides.
-        /// </summary>
-        /// <param name="id">Driver identifier</param>
-        /// <returns>204 NoContent when deleted, 404 if not found, 409 if referenced by rides</returns>
-        [SwaggerOperation(Summary = "Delete a driver if no rides reference them.")]
-        public async Task<IActionResult> Delete([FromRoute, Range(1, int.MaxValue)] int id)
-        {
-            var (deleted, exists) = await _driverService.DeleteDriverAsync(id);
-            if (!exists) return NotFound(new DTOs.ApiResponse<object?> { Message = "Driver not found", Result = null });
-            if (!deleted) return Conflict(new DTOs.ApiResponse<object?> { Message = "Cannot delete driver because one or more rides reference them", Result = null });
-            return Ok(new DTOs.ApiResponse<object?> { Message = "Deleted", Result = null });
-        }
-
         [HttpPost]
         /// <summary>
         /// Register a new driver.
@@ -155,6 +140,21 @@ namespace RideMatchingSystem.Controllers
             if (!list.Any())
                 return NotFound(new DTOs.ApiResponse<object?> { Message = "No nearby drivers found", Result = null });
             return Ok(new DTOs.ApiResponse<object?> { Message = "Success", Result = list });
+        }
+
+        [HttpDelete("{id}")]
+        /// <summary>
+        /// Delete a driver if they have no associated rides.
+        /// </summary>
+        /// <param name="id">Driver identifier</param>
+        /// <returns>204 NoContent when deleted, 404 if not found, 409 if referenced by rides</returns>
+        [SwaggerOperation(Summary = "Delete a driver if no rides reference them.")]
+        public async Task<IActionResult> Delete([FromRoute, Range(1, int.MaxValue)] int id)
+        {
+            var (deleted, exists) = await _driverService.DeleteDriverAsync(id);
+            if (!exists) return NotFound(new DTOs.ApiResponse<object?> { Message = "Driver not found", Result = null });
+            if (!deleted) return Conflict(new DTOs.ApiResponse<object?> { Message = "Cannot delete driver because one or more rides reference them", Result = null });
+            return Ok(new DTOs.ApiResponse<object?> { Message = "Deleted", Result = null });
         }
     }
 }

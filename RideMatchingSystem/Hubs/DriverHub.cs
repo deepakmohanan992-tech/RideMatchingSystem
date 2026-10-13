@@ -32,12 +32,16 @@ namespace RideMatchingSystem.Hubs
         private readonly MatchingService _matchingService;
         private readonly RideService _rideService;
         private readonly ILogger<DriverHub> _logger;
+        private readonly IConnectionRegistry _registry;
+        private readonly IOfferStore _offerStore;
 
-        public DriverHub(DriverService driverService, MatchingService matchingService, RideService rideService, ILogger<DriverHub> logger)
+        public DriverHub(DriverService driverService, MatchingService matchingService, RideService rideService, IConnectionRegistry registry, IOfferStore offerStore, ILogger<DriverHub> logger)
         {
             _driverService = driverService;
             _matchingService = matchingService;
             _rideService = rideService;
+            _registry = registry;
+            _offerStore = offerStore;
             _logger = logger;
         }
 
@@ -49,6 +53,26 @@ namespace RideMatchingSystem.Hubs
             await Clients.Others.DriverLocationUpdated(location);
         }
 
+        public override Task OnConnectedAsync()
+        {
+            // No automatic mapping yet. Clients should call Register to map their driverId -> connection
+            return base.OnConnectedAsync();
+        }
+
+        public override Task OnDisconnectedAsync(System.Exception? exception)
+        {
+            // Remove connection mapping from registry
+            _registry.RemoveByConnection(Context.ConnectionId);
+            return base.OnDisconnectedAsync(exception);
+        }
+
+        // Drivers should call this after connecting to associate their driver id with the connection
+        public Task Register(int driverId)
+        {
+            _registry.Add(driverId, Context.ConnectionId);
+            return Task.CompletedTask;
+        }
+
         public async Task SetAvailability(DriverAvailabilityDto availability)
         {
             await _driverService.SetAvailabilityAsync(availability.DriverId, availability.IsAvailable);
@@ -57,10 +81,24 @@ namespace RideMatchingSystem.Hubs
 
         public async Task AcceptOffer(string offerId)
         {
-            // In this simplified implementation we don't persist ephemeral offers.
-            // Log and notify caller; matching/assignment is handled server-side via MatchingService and RideService.
             _logger.LogInformation("Driver accepted offer {OfferId} (connection {Conn})", offerId, Context.ConnectionId);
-            await Clients.Caller.NotifyMessage($"Accepted offer {offerId}");
+
+            // Look up the offer and attempt to complete assignment
+            if (!_offerStore.TryGet(offerId, out var offer))
+            {
+                await Clients.Caller.OfferCancelled(offerId);
+                return;
+            }
+
+            var result = await _matchingService.AcceptOfferAsync(offerId, offer.DriverId);
+            if (result)
+            {
+                await Clients.Caller.NotifyMessage($"Offer {offerId} accepted and ride assigned");
+            }
+            else
+            {
+                await Clients.Caller.OfferCancelled(offerId);
+            }
         }
 
         public async Task DeclineOffer(string offerId)

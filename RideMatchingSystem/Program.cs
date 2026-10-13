@@ -64,6 +64,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 // Add memory cache and services
 builder.Services.AddMemoryCache();
+// Connection registry and ephemeral offer store for SignalR-driven matching flow
+builder.Services.AddSingleton<RideMatchingSystem.Services.IConnectionRegistry, RideMatchingSystem.Services.ConnectionRegistry>();
+builder.Services.AddSingleton<RideMatchingSystem.Services.IOfferStore, RideMatchingSystem.Services.InMemoryOfferStore>();
 builder.Services.AddScoped<DriverService>();
 builder.Services.AddScoped<RideService>();
 builder.Services.AddScoped<RiderService>();
