@@ -93,69 +93,85 @@ Postman collection
  Detail Explanation
  ----------------------------------------------------------------------------------------
  RideMatchingSystem
-===================
 
-Description
------------
-RideMatchingSystem is a .NET 8 web application that matches riders with available drivers. The project includes an API, SignalR hub for real-time updates, EF Core persistence and a background matching worker.
+Short README
 
-Prerequisites
--------------
-- .NET 8 SDK (dotnet --version should show 8.x)
-- Git
-- Visual Studio 2022/2026 or VS Code (optional)
-- If using EF Core migrations: dotnet-ef (dotnet tool install --global dotnet-ef)
-- A database server (SQLite for demo, or SQL Server/Postgres for production)
+Overview
 
-Quick start (PowerShell)
--------------------------
-1. Clone the repository
-   git clone https://github.com/deepakmohanan992-tech/RideMatchingSystem.git
-   cd RideMatchingSystem
+RideMatchingSystem is a .NET 8 microservice-style Web API that matches riders to drivers in real time. It provides REST endpoints for riders, drivers, and rides, uses SignalR hubs for real-time notifications, and runs a background worker to evaluate and match offers.
 
-2. Restore and build
-   dotnet restore
-   dotnet build --configuration Debug
+Key components
 
-3. Configure application settings
-   - Edit appsettings.Development.json or set environment variables for connection strings and secrets.
-   - Example (PowerShell):
-     $env:ASPNETCORE_ENVIRONMENT = "Development"
-     $env:ConnectionStrings__DefaultConnection = "Server=.;Database=RideMatchingDb;Trusted_Connection=True;"
+- API (Controllers): RidersController, DriversController, RidesController — expose REST endpoints for CRUD and matching operations.
+- Services: DriverService, RiderService, RideService, MatchingService, OfferStore, ConnectionRegistry — encapsulate business logic, in-memory stores and connection management.
+- Background worker: RideMatchingWorker — periodically processes pending ride requests and matches them to available offers.
+- Real-time: SignalR hubs (RiderHub, DriverHub, RideHub) — push notifications and live updates to connected clients.
+- Data: AppDbContext (EF Core) — persistence layer for drivers, riders, and rides.
+- DTOs & Models: Shape API contracts and domain entities.
 
-4. Apply EF Core migrations (if applicable)
-   dotnet ef database update --project RideMatchingSystem --startup-project RideMatchingSystem
+Architecture overview
 
-5. Run the application
-   dotnet run --project RideMatchingSystem --configuration Debug
+The application follows a layered architecture:
 
-6. Open in browser
-   - Typical URLs: http://localhost:5000 and https://localhost:5001 (check console or launchSettings.json)
+- Presentation/API layer: Controllers expose HTTP endpoints and forward requests to the service layer.
+- Service layer: Contains domain logic (matching, rider/driver management) and interacts with persistence and SignalR hubs.
+- Background processing: A hosted worker evaluates matching logic asynchronously to keep request latency low.
+- Persistence: EF Core DbContext stores core entities; the in-memory OfferStore is used for fast ephemeral matching data.
+- Real-time messaging: SignalR hubs notify clients about match updates and ride status changes.
 
-Run from Visual Studio
-----------------------
-- Open RideMatchingSystem.slnx
-- Set the RideMatchingSystem project as startup and press F5 or Ctrl+F5
+Assumptions and trade-offs
 
-Run tests
----------
-- Run all tests: dotnet test
+- Single responsibility services: Services are focused on a small set of operations for clarity and testability.
+- In-memory OfferStore: Chosen for lower latency and simplicity during initial development; not durable across restarts.
+- Consistency: Best-effort matching (eventual consistency) rather than distributed transaction across components to keep the system simple.
+- Simplicity over completeness: The project prioritizes a clear matching flow and real-time updates over advanced features (pricing, routing, geospatial optimizations).
+- Local-first: Defaults and examples assume a single-server deployment for development; production readiness requires additional infrastructure.
 
-Notes
------
-- If the project is using SQLite in Development it may create a local file (ride_matching.db) automatically.
-- For production, replace the demo SQLite provider with SQL Server or Postgres and configure connection strings accordingly.
-- Use environment variables or user secrets for sensitive configuration.
+Scalability considerations
+
+- State & persistence:
+  - Replace in-memory OfferStore and ConnectionRegistry with a shared store (Redis, distributed cache) if running multiple API instances.
+  - Use a central relational database or partitioned data stores; consider read replicas for read-heavy workloads.
+
+- Real-time scale:
+  - Configure SignalR backplane (Redis) or use managed SignalR to distribute messages across multiple servers.
+
+- Background processing:
+  - Move matching logic into a scalable job queue (e.g., Azure Service Bus, RabbitMQ, or Hangfire) for higher throughput and retries.
+  - Workers can be scaled horizontally; ensure idempotency when multiple workers process the same queue.
+
+- Partitioning and routing:
+  - Shard riders and drivers by geographic region or logical partition to reduce matching search scope and speed up lookups.
+
+- Performance & caching:
+  - Cache frequently read data (driver availability, recent locations) with TTL and invalidation strategies.
+  - Introduce indexing and geospatial indexes (PostGIS or built-in DB features) for location-based queries.
+
+- Observability:
+  - Add metrics (Prometheus/OpenTelemetry), structured logs, and distributed tracing to monitor matching latency and system bottlenecks.
+
+Getting started (dev)
+
+- Requirements: .NET 8 SDK
+- Run locally: dotnet run --project RideMatchingSystem
+- Configuration: appsettings.json / appsettings.Development.json contains connection strings and SignalR settings.
+
+Project structure (high level)
+
+- RideMatchingSystem/Program.cs — app startup and DI
+- RideMatchingSystem/Controllers — Web API controllers
+- RideMatchingSystem/Services — business logic and in-memory helpers
+- RideMatchingSystem/BackgroundServices — hosted worker(s)
+- RideMatchingSystem/Hubs — SignalR hubs
+- RideMatchingSystem/Data — EF Core DbContext and migrations
+- RideMatchingSystem/DTOs, Models — API contracts and domain models
 
 Contributing
-------------
-- Fork or create a branch, implement changes, add tests, and open a pull request against the Development branch.
+
+- Follow existing coding style and patterns.
+- Add tests for new matching logic or service behavior.
 
 License
--------
-- See LICENSE in the repository root (if present) or contact the project owner for licensing details.
 
-Want more details added?
------------------------
-If you want repository-specific sections (detailed environment variable names, seed data, deployment steps, or CI instructions), tell me what to include and I will update this README.
+- Check repository license file (if any) for usage terms.
 
