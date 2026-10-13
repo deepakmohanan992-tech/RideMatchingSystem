@@ -1,0 +1,289 @@
+openapi: 3.0.1
+info:
+  title: RideMatchingSystem API
+  version: v1
+servers:
+  - url: https://localhost:5001
+
+paths:
+  /api/auth/register:
+    post:
+      summary: Register a new user (driver or rider)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRegisterRequest'
+      responses:
+        '200': { description: OK }
+
+  /api/auth/login:
+    post:
+      summary: Login and receive JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLoginRequest'
+      responses:
+        '200':
+          description: AuthResponse
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /api/drivers/{id}/location:
+    post:
+      summary: Update driver location
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverLocationUpdateDto'
+      responses: { '202': { description: Accepted } }
+
+  /api/drivers/{id}/availability:
+    post:
+      summary: Set driver availability
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverAvailabilityDto'
+      responses: { '200': { description: OK } }
+
+  /api/drivers/nearby:
+    get:
+      summary: Query nearby drivers
+      parameters:
+        - in: query
+          name: lat
+          required: true
+          schema: { type: number }
+        - in: query
+          name: lng
+          required: true
+          schema: { type: number }
+        - in: query
+          name: radius
+          required: false
+          schema: { type: integer, default: 2000 }
+      responses:
+        '200':
+          description: List of nearby drivers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NearbyDriverSummaryDto'
+
+  /api/rides:
+    post:
+      summary: Create a ride request (returns ride id)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RideRequestDto'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RideResponseDto'
+
+  /api/rides/{id}/match:
+    post:
+      summary: Enqueue a matching job for a ride
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses: { '202': { description: Enqueued } }
+
+  /api/rides/{id}/accept:
+    post:
+      summary: Driver accepts an offer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverDecisionDto'
+      responses: { '200': { description: OK } }
+
+  /api/rides/{id}/decline:
+    post:
+      summary: Driver declines an offer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverDecisionDto'
+      responses: { '200': { description: OK } }
+
+  /api/rides/{id}/cancel:
+    post:
+      summary: Cancel a ride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cancelledByUserId: { type: string }
+                reason: { type: string }
+      responses: { '200': { description: OK } }
+
+  /api/rides/{id}/status:
+    patch:
+      summary: Update ride lifecycle status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RideStatusUpdateDto'
+      responses: { '200': { description: OK } }
+
+  /api/rides/{id}/rating:
+    post:
+      summary: Submit rating for a completed ride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RatingDto'
+      responses: { '201': { description: Created } }
+
+  /health:
+    get:
+      summary: Health check
+      responses: { '200': { description: OK } }
+
+components:
+  schemas:
+    AuthRegisterRequest:
+      type: object
+      properties:
+        name: { type: string }
+        email: { type: string }
+        password: { type: string }
+        role: { type: string }
+
+    AuthLoginRequest:
+      type: object
+      properties:
+        email: { type: string }
+        password: { type: string }
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+        userId: { type: string }
+        role: { type: string }
+
+    DriverLocationUpdateDto:
+      type: object
+      properties:
+        driverId: { type: integer }
+        latitude: { type: number }
+        longitude: { type: number }
+        timestamp: { type: string, format: date-time }
+
+    DriverAvailabilityDto:
+      type: object
+      properties:
+        driverId: { type: integer }
+        isAvailable: { type: boolean }
+
+    NearbyDriverSummaryDto:
+      type: object
+      properties:
+        driverId: { type: integer }
+        distanceMeters: { type: number }
+        location: { $ref: '#/components/schemas/LocationDto' }
+        rating: { type: number }
+
+    LocationDto:
+      type: object
+      properties:
+        latitude: { type: number }
+        longitude: { type: number }
+
+    RideRequestDto:
+      type: object
+      properties:
+        riderId: { type: integer }
+        pickupLocation: { $ref: '#/components/schemas/LocationDto' }
+        dropoffLocation: { $ref: '#/components/schemas/LocationDto' }
+        idempotencyKey: { type: string }
+
+    RideResponseDto:
+      type: object
+      properties:
+        rideId: { type: string }
+        riderId: { type: integer }
+        status: { type: string }
+        pickup: { $ref: '#/components/schemas/LocationDto' }
+        dropoff: { $ref: '#/components/schemas/LocationDto' }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer }
+
+    RideStatusUpdateDto:
+      type: object
+      properties:
+        rideId: { type: string }
+        status: { type: string }
+        expectedVersion: { type: integer }
+
+    RideMatchOfferDto:
+      type: object
+      properties:
+        offerId: { type: string }
+        rideId: { type: string }
+        driverId: { type: integer }
+        etaSeconds: { type: number }
+        driverLocation: { $ref: '#/components/schemas/LocationDto' }
+        estimatedFare: { type: number }
+        expiresAt: { type: string, format: date-time }
+
+    DriverDecisionDto:
+      type: object
+      properties:
+        offerId: { type: string }
+        driverId: { type: integer }
+        accept: { type: boolean }
+
+    RatingDto:
+      type: object
+      properties:
+        rideId: { type: string }
+        fromUserId: { type: string }
+        toUserId: { type: string }
+        stars: { type: integer }
+        comments: { type: string }
